@@ -14,7 +14,6 @@ EMAIL = "23f2001375@ds.study.iitm.ac.in"
 # -----------------------------
 ALLOWED_ORIGINS = [
     "https://app-i52wzh.example.com",
-    # Exam page origin (keep this)
     "https://exam.sanand.workers.dev",
 ]
 
@@ -31,50 +30,41 @@ app.add_middleware(
 # -----------------------------
 RATE_LIMIT = 14
 WINDOW = 10
-
 buckets = defaultdict(deque)
 
-
+# -----------------------------
+# Request Context + Rate Limiter
+# -----------------------------
 @app.middleware("http")
-async def rate_limit(request: Request, call_next):
+async def request_context_and_rate_limit(request: Request, call_next):
+    # Request ID
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    request.state.request_id = request_id
+
+    # Client ID
     client = request.headers.get("X-Client-Id", "anonymous")
 
     now = time.time()
-    q = buckets[client]
+    bucket = buckets[client]
 
-    while q and now - q[0] > WINDOW:
-        q.popleft()
+    # Remove expired timestamps
+    while bucket and now - bucket[0] >= WINDOW:
+        bucket.popleft()
 
-    if len(q) >= RATE_LIMIT:
-        return JSONResponse(
+    # Rate limit check
+    if len(bucket) >= RATE_LIMIT:
+        response = JSONResponse(
             status_code=429,
             content={"detail": "Rate limit exceeded"},
         )
+        response.headers["X-Request-ID"] = request_id
+        return response
 
-    q.append(now)
-
-    response = await call_next(request)
-    return response
-
-
-# -----------------------------
-# Request Context Middleware
-# -----------------------------
-@app.middleware("http")
-async def request_context(request: Request, call_next):
-    request_id = request.headers.get("X-Request-ID")
-
-    if not request_id:
-        request_id = str(uuid.uuid4())
-
-    request.state.request_id = request_id
+    bucket.append(now)
 
     response = await call_next(request)
-
     response.headers["X-Request-ID"] = request_id
-
     return response
-
 
 # -----------------------------
 # Endpoint
