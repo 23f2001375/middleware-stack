@@ -39,6 +39,8 @@ buckets = defaultdict(deque)
 @app.middleware("http")
 async def request_context_and_rate_limit(request: Request, call_next):
     # Request ID
+    if request.method == "OPTIONS":
+        return await call_next(request)
     request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
     request.state.request_id = request_id
 
@@ -58,6 +60,12 @@ async def request_context_and_rate_limit(request: Request, call_next):
             status_code=429,
             content={"detail": "Rate limit exceeded"},
         )
+    
+        origin = request.headers.get("Origin")
+        if origin in ALLOWED_ORIGINS:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Vary"] = "Origin"
+
         response.headers["X-Request-ID"] = request_id
         return response
 
